@@ -37,6 +37,7 @@ type StreamOptions struct {
 	Stdin             io.Reader
 	Stdout            io.Writer
 	Stderr            io.Writer
+	CloseChan         chan bool
 	Tty               bool
 	TerminalSizeQueue TerminalSizeQueue
 }
@@ -121,6 +122,10 @@ func (e *streamExecutor) Stream(options StreamOptions) error {
 		return err
 	}
 	defer conn.Close()
+	go func() {
+		<-options.CloseChan
+		conn.Close()
+	}()
 
 	var streamer streamProtocolHandler
 
