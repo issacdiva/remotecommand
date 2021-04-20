@@ -122,9 +122,14 @@ func (e *streamExecutor) Stream(options StreamOptions) error {
 		return err
 	}
 	defer conn.Close()
+
 	go func() {
-		<-options.CloseChan
-		conn.Close()
+		select {
+		case <-options.CloseChan:
+			conn.Close()
+		case <-conn.CloseChan():
+			return
+		}
 	}()
 
 	var streamer streamProtocolHandler
