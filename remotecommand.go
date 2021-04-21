@@ -17,6 +17,7 @@ limitations under the License.
 package remotecommand
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,7 +38,6 @@ type StreamOptions struct {
 	Stdin             io.Reader
 	Stdout            io.Writer
 	Stderr            io.Writer
-	CloseChan         chan bool
 	Tty               bool
 	TerminalSizeQueue TerminalSizeQueue
 }
@@ -49,6 +49,10 @@ type Executor interface {
 	// is set, the stderr stream is not used (raw TTY manages stdout and stderr over the
 	// stdout stream).
 	Stream(options StreamOptions) error
+	// StreamContext initiates the transport of the standard shell streams through Context.
+	StreamContext(ctx context.Context, options StreamOptions) error
+	// StreamRequest initiates the transport of the standard shell streams through Request.
+	StreamRequest(req *http.Request, options StreamOptions) error
 }
 
 type streamCreator interface {
@@ -112,6 +116,24 @@ func (e *streamExecutor) Stream(options StreamOptions) error {
 		return fmt.Errorf("error creating request: %v", err)
 	}
 
+	return e.StreamRequest(req, options)
+}
+
+// StreamContext opens a protocol streamer to the server and streams until a client closes
+// the connection or the server disconnects, but it can be closed through the Context.
+func (e *streamExecutor) StreamContext(ctx context.Context, options StreamOptions) error {
+	req, err := http.NewRequestWithContext(ctx, e.method, e.url.String(), nil)
+	//req, err := http.NewRequest(e.method, e.url.String(), nil)
+	if err != nil {
+		return fmt.Errorf("error creating request: %v", err)
+	}
+
+	return e.StreamRequest(req, options)
+}
+
+// StreamRequest uses a custom Request to open a protocol streamer to the server and streams until a client closes
+// the connection or the server disconnects.
+func (e *streamExecutor) StreamRequest(req *http.Request, options StreamOptions) error {
 	conn, protocol, err := spdy.Negotiate(
 		e.upgrader,
 		&http.Client{Transport: e.transport},
@@ -122,15 +144,6 @@ func (e *streamExecutor) Stream(options StreamOptions) error {
 		return err
 	}
 	defer conn.Close()
-
-	go func() {
-		select {
-		case <-options.CloseChan:
-			conn.Close()
-		case <-conn.CloseChan():
-			return
-		}
-	}()
 
 	var streamer streamProtocolHandler
 
