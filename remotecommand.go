@@ -38,6 +38,7 @@ type StreamOptions struct {
 	Stdin             io.Reader
 	Stdout            io.Writer
 	Stderr            io.Writer
+	CloseChan         chan bool
 	Tty               bool
 	TerminalSizeQueue TerminalSizeQueue
 }
@@ -143,6 +144,17 @@ func (e *streamExecutor) StreamRequest(req *http.Request, options StreamOptions)
 	if err != nil {
 		return err
 	}
+	
+	go func() {
+		select {
+		case <-options.CloseChan:
+			conn.Close()
+		case <-conn.CloseChan():
+			return
+		}
+	}()
+	
+		
 	defer conn.Close()
 
 	var streamer streamProtocolHandler
